@@ -1,0 +1,22 @@
+{
+  "name": "com.example.ntripclient",
+  "version": "1.0.0",
+  "description": "ntrip client",
+  "cordova": {
+    "id": "com.example.ntripclient",
+    "platforms": [
+      "android"
+    ]
+  },
+  "keywords": [
+    "ecosystem:cordova",
+    "cordova-android"
+  ],
+  "author": "shao tao",
+  "license": "ISC",
+  "dependencies": {
+    "cordova": "^12.0.0",
+    "to": "^0.2.9",
+    "update": "^0.7.4"
+  }
+}
