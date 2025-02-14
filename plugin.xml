@@ -10,16 +10,24 @@
 </feature></config-file>
 <config-file parent="/*" target="AndroidManifest.xml"></config-file>
 <source-file src="src/android/NtripClientPlugin.java" target-dir="src/com/example/ntripclient/NtripClientPlugin" /></platform></plugin> -->
-
 <?xml version='1.0' encoding='utf-8'?>
-<plugin id="com.example.ntripclient" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
-<name>NtripClientPlugin</name>
-<js-module name="NtripClientPlugin" src="www/NtripClientPlugin.js">
-<clobbers target="cordova.plugins.NtripClientPlugin" />
-</js-module><platform name="android">
-<config-file parent="/*" target="res/xml/config.xml">
-<feature name="NtripClientPlugin">
-<param name="android-package" value="com.example.ntripclient.NtripClientPlugin" />
-</feature></config-file>
-<config-file parent="/*" target="AndroidManifest.xml"></config-file>
-<source-file src="src/android/com/android/example/ntripclient/NtripClientPlugin.java" target-dir="src/com/example/ntripclient/" /></platform></plugin>
+<plugin id="cordova-plugin-ntrip-client" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+    <name>NtripClientPlugin</name>
+    <js-module name="NtripClient" src="www/NtripClient.js">
+        <clobbers target="window.NtripClient" />
+    </js-module>
+    <platform name="android">
+        <config-file parent="/*" target="res/xml/config.xml">
+            <feature name="NtripClient">
+                <!-- 确保这里的包名和实际 Java 类的包名一致 -->
+                <param name="android-package" value="com.example.ntripclient.NtripClient" />
+            </feature>
+        </config-file>
+        <config-file parent="/*" target="AndroidManifest.xml">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+        </config-file>
+        <!-- 修正 src 和 target-dir 的路径 -->
+        <source-file src="src/android/com/example/ntripclient/NtripClient.java" target-dir="src/com/example/ntripclient" />
+    </platform>
+</plugin>
