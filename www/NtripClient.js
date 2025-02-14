@@ -24,6 +24,9 @@ var NtripClient = {
     },
     registerOnClose: function(callback) {
       exec(callback, null, 'NtripClient', 'registerOnClose', []);
+    },
+    registerOnRTCM: function(callback) {
+      exec(callback, null, 'NtripClient', 'registerOnRTCM', []);
     }
 };
 

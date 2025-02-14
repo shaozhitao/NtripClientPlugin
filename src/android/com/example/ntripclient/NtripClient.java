@@ -29,6 +29,7 @@ public class NtripClient extends CordovaPlugin {
     private CallbackContext onDataCallbackContext;
     private CallbackContext onErrorCallbackContext;
     private CallbackContext onCloseCallbackContext;
+    private CallbackContext onRTCMCallbackContext;
 
     @Override
     public void initialize(CordovaInterface cordova, CordovaWebView webView) {
@@ -37,6 +38,7 @@ public class NtripClient extends CordovaPlugin {
         onDataCallbackContext = null;
         onErrorCallbackContext = null;
         onCloseCallbackContext = null;
+        onRTCMCallbackContext = null;
     }
 
     @Override
@@ -67,6 +69,13 @@ public class NtripClient extends CordovaPlugin {
                 onDataCallbackContext = callbackContext;
                 // 保持回调通道打开
                 PluginResult pluginResult = new PluginResult(PluginResult.Status.NO_RESULT);
+                pluginResult.setKeepCallback(true);
+                callbackContext.sendPluginResult(pluginResult);
+                return true;
+            case "registerOnRTCM":
+                onRTCMCallbackContext = callbackContext;
+                // 保持回调通道打开
+                pluginResult = new PluginResult(PluginResult.Status.NO_RESULT);
                 pluginResult.setKeepCallback(true);
                 callbackContext.sendPluginResult(pluginResult);
                 return true;
@@ -194,8 +203,9 @@ public class NtripClient extends CordovaPlugin {
                                 String hexData = bytesToHex(receivedData);
                                 //callbackContext.success(hexData);
                                 //callbackContext.success(hexData);
-                                sendMessageToJavaScript2("发送数据");
-                                sendMessageToJavaScript2(hexData);
+                                //sendMessageToJavaScript2("发送数据");
+                                //sendMessageToJavaScript2(hexData);
+                                sendRTCMToJavaScript(hexData);
                             }
                         }
                     } catch (IOException e) {
@@ -299,6 +309,16 @@ public class NtripClient extends CordovaPlugin {
             dataResult2.setKeepCallback(true);
             onDataCallbackContext.sendPluginResult(dataResult);
             onDataCallbackContext.sendPluginResult(dataResult2);
+        }
+    }
+
+    // 新增的方法，用于触发 JavaScript 端的消息接收事件
+    private void sendRTCMToJavaScript(String message) {
+        // 触发 onData 事件
+        if (onDataCallbackContext != null) {
+            PluginResult dataResult = new PluginResult(PluginResult.Status.OK, message);
+            dataResult.setKeepCallback(true);
+            onRTCMCallbackContext.sendPluginResult(dataResult);
         }
     }
 
