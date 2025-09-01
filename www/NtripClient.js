@@ -1,8 +1,8 @@
 var exec = require('cordova/exec');
 
 var NtripClient = {
-    startNtripClient: function(ip, port, username, password, gngga, successCallback, errorCallback) {
-        exec(successCallback, errorCallback, 'NtripClient', 'startNtripClient', [ip, port, username, password, gngga]);
+    startNtripClient: function(ip, port, username, password, gngga, mountPoint, successCallback, errorCallback) {
+        exec(successCallback, errorCallback, 'NtripClient', 'startNtripClient', [ip, port, username, password, gngga, mountPoint]);
     },
     stopNtripClient: function(successCallback, errorCallback) {
         exec(successCallback, errorCallback, 'NtripClient', 'stopNtripClient', []);
@@ -27,6 +27,9 @@ var NtripClient = {
     },
     registerOnRTCM: function(callback) {
       exec(callback, null, 'NtripClient', 'registerOnRTCM', []);
+    },
+    getMountPointList: function(ip, port, successCallback, errorCallback) {
+      exec(successCallback, errorCallback, 'NtripClient', 'getMountPointList', [ip, port]);
     }
 };
 

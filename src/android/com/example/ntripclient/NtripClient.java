@@ -1,4 +1,5 @@
 package com.example.ntripclient;
+
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaArgs;
 import org.apache.cordova.CordovaInterface;
@@ -17,14 +18,14 @@ import java.net.Socket;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 
-
 public class NtripClient extends CordovaPlugin {
     private static final int RECONNECT_DELAY_SECONDS = 5; // 重连延迟时间，单位：秒
-    private static final int MAX_RECONNECT_ATTEMPTS = 10; // 最大重连尝试次数
+    private static final int MAX_RECONNECT_ATTEMPTS = 5; // 最大重连尝试次数
 
     private Socket socket;
     private OutputStream outputStream;
     private boolean isConnected = false;
+    private boolean shouldReconnect = true; // 新增标志位
 
     private CallbackContext onDataCallbackContext;
     private CallbackContext onErrorCallbackContext;
@@ -50,9 +51,12 @@ public class NtripClient extends CordovaPlugin {
                 String username = args.getString(2);
                 String password = args.getString(3);
                 String gngga = args.getString(4);
-                startNtripClient(ip, port, username, password, gngga, callbackContext);
+                String mountPoint = args.getString(5);
+                shouldReconnect = true; // 启动时允许重连
+                startNtripClient(ip, port, username, password, gngga, mountPoint, callbackContext);
                 return true;
             case "stopNtripClient":
+                shouldReconnect = false; // 启动时允许重连
                 stopNtripClient(callbackContext);
                 return true;
             case "getConnectionStatus":
@@ -93,11 +97,15 @@ public class NtripClient extends CordovaPlugin {
                 pluginResult.setKeepCallback(true);
                 callbackContext.sendPluginResult(pluginResult);
                 return true;
+            case "getMountPointList":
+                String mountPointIp = args.getString(0);
+                int mountPointPort = args.getInt(1);
+                getMountPointList(mountPointIp, mountPointPort, callbackContext);
+                return true;
             default:
                 return false;
         }
     }
-
 
     public String strToBytes(String normalString) {
         // 普通字符串
@@ -115,13 +123,15 @@ public class NtripClient extends CordovaPlugin {
         return hexData;
     }
 
-    private void startNtripClient(final String ip, final int port, final String username, final String password, final String gngga, final CallbackContext callbackContext) {
+    private void startNtripClient(final String ip, final int port, final String username, final String password, final String gngga, final String mountPoint, final CallbackContext callbackContext) {
         cordova.getThreadPool().execute(new Runnable() {
             @Override
             public void run() {
                 int reconnectAttempts = 0;
-                while (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                String connectState = "";
+                while (shouldReconnect && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                     try {
+                        reconnectAttempts++;
                         socket = new Socket(ip, port);
                         outputStream = socket.getOutputStream();
                         InputStream inputStream = socket.getInputStream();
@@ -132,8 +142,11 @@ public class NtripClient extends CordovaPlugin {
                         String base64Auth = Base64.getEncoder().encodeToString(authString.getBytes());
 
                         // 构建 NTRIP 请求
+
                         StringBuilder request = new StringBuilder();
-                        request.append("GET /RTCM32_GGB HTTP/1.1\r\n");
+                        // request.append("GET /RTCM32_GGB HTTP/1.1\r\n");
+                        String mountPointSet = "GET /" + mountPoint + " HTTP/1.1\r\n";
+                        request.append(mountPointSet);
                         request.append("User-Agent: NTRIP Java Client\r\n");
                         request.append("Host: ").append(ip).append("\r\n");
                         request.append("Authorization: Basic ").append(base64Auth).append("\r\n");
@@ -154,6 +167,8 @@ public class NtripClient extends CordovaPlugin {
                             if (line.isEmpty()) {
                                 break;
                             }
+
+                            sendMessageToJavaScript2("服务器响应头: " + line);
                             System.out.println("服务器响应头: " + line); // 打印响应头
                             if (line.startsWith("HTTP/1.1 200 OK") || line.startsWith("ICY 200 OK")) {
                                 statusOk = true;
@@ -163,30 +178,28 @@ public class NtripClient extends CordovaPlugin {
                                     PluginResult dataResult = new PluginResult(PluginResult.Status.OK, "成功连接到 NTRIP 服务器");
                                     dataResult.setKeepCallback(true);
                                     onDataCallbackContext.sendPluginResult(dataResult);
-
-
                                 } else {
                                     PluginResult dataResult = new PluginResult(PluginResult.Status.OK, "不是ICY 200 OK");
                                     dataResult.setKeepCallback(true);
                                     onDataCallbackContext.sendPluginResult(dataResult);
                                 }
                             } else {
-                                String message = strToBytes("连接 NTRIP 服务器失败");
-                                // 触发 onError 事件
-
-
-
-                                if (onErrorCallbackContext != null) {
-                                    PluginResult errorResult = new PluginResult(PluginResult.Status.ERROR, "连接失败，服务器未返回 200 OK 状态码");
-                                    errorResult.setKeepCallback(true);
-                                    onErrorCallbackContext.sendPluginResult(errorResult);
+                                if (line.contains("HTTP 401 Unauthorized")) {
+                                  connectState = "Unauthorized";
                                 }
+                                //String message = strToBytes("连接 NTRIP 服务器失败");
+                                // 触发 onError 事件
+                                //if (onErrorCallbackContext != null) {
+                                //    PluginResult errorResult = new PluginResult(PluginResult.Status.ERROR, "连接失败，服务器未返回 200 OK 状态码");
+                                //    errorResult.setKeepCallback(true);
+                                //    onErrorCallbackContext.sendPluginResult(errorResult);
+                                //}
                             }
                         }
 
                         if (statusOk) {
-
                             System.out.println("成功连接到 NTRIP 服务器");
+                            callbackContext.success("成功连接到 NTRIP 服务器");
                             isConnected = true;
                             reconnectAttempts = 0; // 连接成功，重置重连尝试次数
                             byte[] buffer = new byte[4096];
@@ -210,26 +223,26 @@ public class NtripClient extends CordovaPlugin {
                         }
                     } catch (IOException e) {
                         //System.err.println("发生网络错误: " + e.getMessage());
-                        callbackContext.error("发生网络错误");
                         reconnectAttempts++;
-                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS && shouldReconnect) {
                             System.out.println("尝试第 " + reconnectAttempts + " 次重连，将在 " + RECONNECT_DELAY_SECONDS + " 秒后进行...");
                             try {
                                 TimeUnit.SECONDS.sleep(RECONNECT_DELAY_SECONDS);
                             } catch (InterruptedException ie) {
                                 Thread.currentThread().interrupt();
                             }
-                        } else {
-                            System.out.println("达到最大重连尝试次数，停止重连。");
-                            // 触发 onError 事件
-                            if (onErrorCallbackContext != null) {
-                                PluginResult errorResult = new PluginResult(PluginResult.Status.ERROR, "达到最大重连尝试次数，停止重连。");
-                                errorResult.setKeepCallback(true);
-                                onErrorCallbackContext.sendPluginResult(errorResult);
-                            }
                         }
                     }
+                    // 每 5 秒执行一次循环
+                    try {
+                        TimeUnit.SECONDS.sleep(RECONNECT_DELAY_SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
+
+                sendMessageToJavaScript2("连接 NTRIP 服务器彻底失败" + reconnectAttempts);
+                callbackContext.error("connect failed");
             }
         });
     }
@@ -328,5 +341,56 @@ public class NtripClient extends CordovaPlugin {
             result.append(String.format("%02X ", b));
         }
         return result.toString();
+    }
+
+    private void getMountPointList(final String ip, final int port, final CallbackContext callbackContext) {
+        cordova.getThreadPool().execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Socket socket = new Socket(ip, port);
+                    OutputStream outputStream = socket.getOutputStream();
+                    InputStream inputStream = socket.getInputStream();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+
+                    // 构建 NTRIP 请求以获取挂载点列表
+                    StringBuilder request = new StringBuilder();
+                    request.append("GET / HTTP/1.1\r\n");
+                    request.append("User-Agent: NTRIP Java Client\r\n");
+                    request.append("Host: ").append(ip).append("\r\n");
+                    request.append("Accept: */*\r\n");
+                    request.append("Connection: close\r\n\r\n");
+
+                    // 发送请求
+                    outputStream.write(request.toString().getBytes());
+                    outputStream.flush();
+
+                    // 读取响应头
+                    String line;
+                    JSONArray mountPointList = new JSONArray();
+                    boolean inSourceTable = false;
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith("ENDSOURCETABLE")) {
+                            break;
+                        }
+                        if (inSourceTable && line.startsWith("STR")) {
+                            String[] parts = line.split(";");
+                            if (parts.length > 1) {
+                                String mountPoint = parts[1];
+                                mountPointList.put(mountPoint);
+                            }
+                        }
+                        if (line.startsWith("SOURCETABLE")) {
+                            inSourceTable = true;
+                        }
+                    }
+
+                    socket.close();
+                    callbackContext.success(mountPointList);
+                } catch (IOException e) {
+                    callbackContext.error("获取挂载点列表时发生网络错误: " + e.getMessage());
+                }
+            }
+        });
     }
 }
