@@ -30,4 +30,24 @@
         <!-- 修正 src 和 target-dir 的路径 -->
         <source-file src="src/android/com/example/ntripclient/NtripClient.java" target-dir="src/com/example/ntripclient" />
     </platform>
+
+    <!-- 添加iOS平台配置 -->
+    <platform name="ios">
+        <config-file parent="/*" target="config.xml">
+            <feature name="NtripClient">
+                <param name="ios-package" value="NtripClient" />
+            </feature>
+        </config-file>
+        
+        <source-file src="src/ios/NtripClient.h" />
+        <source-file src="src/ios/NtripClient.m" />
+        
+        <!-- 添加网络权限 -->
+        <config-file parent="NSAppTransportSecurity" target="*-Info.plist">
+            <dict>
+                <key>NSAllowsArbitraryLoads</key>
+                <true/>
+            </dict>
+        </config-file>
+    </platform>
 </plugin>
