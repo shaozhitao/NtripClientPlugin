@@ -10,16 +10,20 @@
 </feature></config-file>
 <config-file parent="/*" target="AndroidManifest.xml"></config-file>
 <source-file src="src/android/NtripClientPlugin.java" target-dir="src/com/example/ntripclient/NtripClientPlugin" /></platform></plugin> -->
+
 <?xml version='1.0' encoding='utf-8'?>
 <plugin id="cordova-plugin-ntrip-client" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+
     <name>NtripClientPlugin</name>
+    <!-- JS 模块，Android/iOS 都能用 -->
     <js-module name="NtripClient" src="www/NtripClient.js">
         <clobbers target="window.NtripClient" />
     </js-module>
+
+    <!-- Android 平台 -->
     <platform name="android">
         <config-file parent="/*" target="res/xml/config.xml">
             <feature name="NtripClient">
-                <!-- 确保这里的包名和实际 Java 类的包名一致 -->
                 <param name="android-package" value="com.example.ntripclient.NtripClient" />
             </feature>
         </config-file>
@@ -27,7 +31,26 @@
             <uses-permission android:name="android.permission.INTERNET" />
             <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
         </config-file>
-        <!-- 修正 src 和 target-dir 的路径 -->
         <source-file src="src/android/com/example/ntripclient/NtripClient.java" target-dir="src/com/example/ntripclient" />
     </platform>
+
+    <!-- iOS 平台 -->
+    <platform name="ios">
+        <config-file parent="/*" target="config.xml">
+            <feature name="NtripClient">
+                <param name="ios-package" value="NtripClient" />
+            </feature>
+        </config-file>
+
+        <!-- 如果你有 NtripClient.m/h 源码 -->
+        <source-file src="src/ios/NtripClient.m" />
+        <header-file src="src/ios/NtripClient.h" />
+
+        <!-- 如果你有 NtripClient.framework -->
+        <!-- <framework src="src/ios/NtripClient.framework" custom="true" embed="true" /> -->
+
+        <!-- 如果需要 CocoaPods -->
+        <!-- <pod name="NtripClient" spec="~> 1.0.0" /> -->
+    </platform>
+
 </plugin>
