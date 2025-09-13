@@ -1,171 +1,259 @@
 #import "NtripClient.h"
-#import <Cordova/CDV.h>
 
-@implementation NtripClient {
-    CDVPlugin *_plugin;
-    NSInputStream *_inputStream;
-    NSOutputStream *_outputStream;
-    NSString *_ip;
-    int _port;
-    NSString *_username;
-    NSString *_password;
-    NSString *_mountPoint;
-    BOOL _isConnected;
-    BOOL _shouldReconnect;
-    int _reconnectAttempts;
-    NSTimer *_reconnectTimer;
-}
+@implementation NtripClient
 
 - (void)pluginInitialize {
-    [super pluginInitialize];
-    _isConnected = NO;
-    _shouldReconnect = NO;
-    _reconnectAttempts = 0;
+    self.isConnected = NO;
+    self.shouldReconnect = NO;
+    self.reconnectAttempts = 0;
 }
 
-- (void)startNtripClient:(CDVInvokedUrlCommand *)command {
-    _ip = [command.arguments objectAtIndex:0];
-    _port = [[command.arguments objectAtIndex:1] intValue];
-    _username = [command.arguments objectAtIndex:2];
-    _password = [command.arguments objectAtIndex:3];
-    NSString *gngga = [command.arguments objectAtIndex:4];
-    _mountPoint = [command.arguments objectAtIndex:5];
-    _shouldReconnect = YES;
-    _reconnectAttempts = 0;
-    
+#pragma mark - API 实现
+
+- (void)startNtripClient:(CDVInvokedUrlCommand*)command {
+    self.ip        = [command.arguments objectAtIndex:0];
+    self.port      = [[command.arguments objectAtIndex:1] intValue];
+    self.username  = [command.arguments objectAtIndex:2];
+    self.password  = [command.arguments objectAtIndex:3];
+    self.gngga     = [command.arguments objectAtIndex:4];
+    self.mountPoint= [command.arguments objectAtIndex:5];
+
+    self.shouldReconnect = YES;
+    self.reconnectAttempts = 0;
+
     [self connectToServer:command.callbackId];
 }
 
 - (void)connectToServer:(NSString *)callbackId {
-    if (_isConnected) {
-        [self sendSuccessResult:@"Already connected" callbackId:callbackId];
-        return;
-    }
-    
+    if (self.isConnected) return;
+
     CFReadStreamRef readStream;
     CFWriteStreamRef writeStream;
-    CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)_ip, _port, &readStream, &writeStream);
-    
-    _inputStream = (__bridge NSInputStream *)readStream;
-    _outputStream = (__bridge NSOutputStream *)writeStream;
-    
-    _inputStream.delegate = self;
-    _outputStream.delegate = self;
-    
-    [_inputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-    [_outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-    
-    [_inputStream open];
-    [_outputStream open];
+    CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)self.ip, self.port, &readStream, &writeStream);
+
+    self.inputStream = (__bridge_transfer NSInputStream*)readStream;
+    self.outputStream = (__bridge_transfer NSOutputStream*)writeStream;
+
+    self.inputStream.delegate = self;
+    self.outputStream.delegate = self;
+
+    [self.inputStream scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+    [self.outputStream scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+
+    [self.inputStream open];
+    [self.outputStream open];
 }
 
-- (void)stream:(NSStream *)stream handleEvent:(NSStreamEvent)eventCode {
-    switch (eventCode) {
-        case NSStreamEventOpenCompleted:
-            [self handleConnectionOpen];
-            break;
-        case NSStreamEventHasBytesAvailable:
-            [self handleIncomingData];
-            break;
-        case NSStreamEventErrorOccurred:
-            [self handleStreamError:stream.streamError];
-            break;
-        case NSStreamEventEndEncountered:
-            [self handleConnectionClose];
-            break;
-        default:
-            break;
+- (void)stopNtripClient:(CDVInvokedUrlCommand*)command {
+    self.shouldReconnect = NO;
+    [self.reconnectTimer invalidate];
+    [self.inputStream close];
+    [self.outputStream close];
+    self.isConnected = NO;
+
+    CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"NTRIP 客户端已停止"];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+
+    if (self.onCloseCallbackId) {
+        CDVPluginResult *closeResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"NTRIP 客户端已停止"];
+        [closeResult setKeepCallbackAsBool:YES];
+        [self.commandDelegate sendPluginResult:closeResult callbackId:self.onCloseCallbackId];
     }
 }
 
-- (void)handleConnectionOpen {
-    _isConnected = YES;
-    _reconnectAttempts = 0;
-    [self sendNtripRequest];
-    
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"成功连接到NTRIP服务器"];
-    [self.commandDelegate sendPluginResult:result callbackId:@"onData"];
+- (void)getConnectionStatus:(CDVInvokedUrlCommand*)command {
+    CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:self.isConnected];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
+
+- (void)getConnectionInfo:(CDVInvokedUrlCommand*)command {
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    [info setValue:self.ip forKey:@"ip"];
+    [info setValue:@(self.port) forKey:@"port"];
+    CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:info];
+    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+}
+
+- (void)sendGngga:(CDVInvokedUrlCommand*)command {
+    if (self.isConnected && self.outputStream) {
+        NSData *data = [[command.arguments objectAtIndex:0] dataUsingEncoding:NSUTF8StringEncoding];
+        [self.outputStream write:data.bytes maxLength:data.length];
+        CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"GNGGA 发送成功"];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    } else {
+        CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"未连接"];
+        [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+    }
+}
+
+- (void)getMountPointList:(CDVInvokedUrlCommand *)command {
+    NSString *ip = [command.arguments objectAtIndex:0];
+    NSNumber *portNumber = [command.arguments objectAtIndex:1];
+    int port = [portNumber intValue];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        @try {
+            // 创建 socket 连接
+            CFReadStreamRef readStream;
+            CFWriteStreamRef writeStream;
+            CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)ip, port, &readStream, &writeStream);
+
+            NSInputStream *inputStream = (__bridge_transfer NSInputStream *)readStream;
+            NSOutputStream *outputStream = (__bridge_transfer NSOutputStream *)writeStream;
+
+            [inputStream open];
+            [outputStream open];
+
+            // 构造 Sourcetable 请求
+            NSString *request =
+                @"GET / HTTP/1.1\r\n"
+                @"User-Agent: NTRIP iOS Client\r\n"
+                @"Host: %@\r\n"
+                @"Accept: */*\r\n"
+                @"Connection: close\r\n\r\n";
+            NSString *reqString = [NSString stringWithFormat:request, ip];
+            NSData *reqData = [reqString dataUsingEncoding:NSUTF8StringEncoding];
+            [outputStream write:reqData.bytes maxLength:reqData.length];
+
+            NSMutableData *responseData = [NSMutableData data];
+            uint8_t buffer[1024];
+            NSInteger len;
+
+            while ((len = [inputStream read:buffer maxLength:sizeof(buffer)]) > 0) {
+                [responseData appendBytes:buffer length:len];
+            }
+
+            [inputStream close];
+            [outputStream close];
+
+            NSString *response = [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
+            NSArray *lines = [response componentsSeparatedByString:@"\n"];
+            BOOL inSourceTable = NO;
+            NSMutableArray *mountPoints = [NSMutableArray array];
+
+            for (NSString *line in lines) {
+                NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+                if ([trimmed hasPrefix:@"SOURCETABLE"]) {
+                    inSourceTable = YES;
+                } else if ([trimmed hasPrefix:@"ENDSOURCETABLE"]) {
+                    break;
+                } else if (inSourceTable && [trimmed hasPrefix:@"STR"]) {
+                    NSArray *parts = [trimmed componentsSeparatedByString:@";"];
+                    if (parts.count > 1) {
+                        [mountPoints addObject:parts[1]];
+                    }
+                }
+            }
+
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:mountPoints];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }
+        @catch (NSException *exception) {
+            CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:exception.reason];
+            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
+        }
+    });
+}
+
+
+#pragma mark - NSStreamDelegate
+
+- (void)stream:(NSStream *)aStream handleEvent:(NSStreamEvent)eventCode {
+    switch (eventCode) {
+        case NSStreamEventOpenCompleted: {
+            self.isConnected = YES;
+            self.reconnectAttempts = 0;
+            [self sendNtripRequest];
+            if (self.onDataCallbackId) {
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"成功连接到 NTRIP 服务器"];
+                [result setKeepCallbackAsBool:YES];
+                [self.commandDelegate sendPluginResult:result callbackId:self.onDataCallbackId];
+            }
+        } break;
+        case NSStreamEventHasBytesAvailable: {
+            uint8_t buffer[4096];
+            NSInteger len = [self.inputStream read:buffer maxLength:sizeof(buffer)];
+            if (len > 0 && self.onRTCMCallbackId) {
+                NSData *data = [NSData dataWithBytes:buffer length:len];
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArrayBuffer:data];
+                [result setKeepCallbackAsBool:YES];
+                [self.commandDelegate sendPluginResult:result callbackId:self.onRTCMCallbackId];
+            }
+        } break;
+        case NSStreamEventErrorOccurred: {
+            self.isConnected = NO;
+            if (self.onErrorCallbackId) {
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:aStream.streamError.localizedDescription];
+                [result setKeepCallbackAsBool:YES];
+                [self.commandDelegate sendPluginResult:result callbackId:self.onErrorCallbackId];
+            }
+        } break;
+        case NSStreamEventEndEncountered: {
+            self.isConnected = NO;
+            if (self.onCloseCallbackId) {
+                CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"连接已关闭"];
+                [result setKeepCallbackAsBool:YES];
+                [self.commandDelegate sendPluginResult:result callbackId:self.onCloseCallbackId];
+            }
+        } break;
+        default: break;
+    }
+}
+
+#pragma mark - Private
 
 - (void)sendNtripRequest {
-    NSString *authString = [NSString stringWithFormat:@"%@:%@", _username, _password];
-    NSData *authData = [authString dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *auth = [NSString stringWithFormat:@"%@:%@", self.username, self.password];
+    NSData *authData = [auth dataUsingEncoding:NSUTF8StringEncoding];
     NSString *base64Auth = [authData base64EncodedStringWithOptions:0];
-    
-    NSString *request = [NSString stringWithFormat:
-                        @"GET /%@ HTTP/1.1\r\n"
-                        @"User-Agent: NTRIP iOS Client\r\n"
-                        @"Host: %@:%d\r\n"
-                        @"Authorization: Basic %@\r\n"
-                        @"Accept: */*\r\n"
-                        @"Connection: close\r\n\r\n",
-                        _mountPoint, _ip, _port, base64Auth];
-    
-    NSData *requestData = [request dataUsingEncoding:NSUTF8StringEncoding];
-    [_outputStream write:requestData.bytes maxLength:requestData.length];
-}
 
-- (void)handleIncomingData {
-    uint8_t buffer[1024];
-    NSInteger bytesRead = [_inputStream read:buffer maxLength:sizeof(buffer)];
-    
-    if (bytesRead > 0) {
-        NSData *data = [NSData dataWithBytes:buffer length:bytesRead];
-        CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArrayBuffer:data];
-        [result setKeepCallbackAsBool:YES];
-        [self.commandDelegate sendPluginResult:result callbackId:@"onRTCM"];
+    NSString *req = [NSString stringWithFormat:
+                     @"GET /%@ HTTP/1.1\r\n"
+                     @"User-Agent: NTRIP iOS Client\r\n"
+                     @"Host: %@:%d\r\n"
+                     @"Authorization: Basic %@\r\n"
+                     @"Accept: */*\r\n"
+                     @"Connection: close\r\n\r\n",
+                     self.mountPoint, self.ip, self.port, base64Auth];
+
+    NSData *data = [req dataUsingEncoding:NSUTF8StringEncoding];
+    [self.outputStream write:data.bytes maxLength:data.length];
+
+    if (self.gngga) {
+        NSData *ggaData = [self.gngga dataUsingEncoding:NSUTF8StringEncoding];
+        [self.outputStream write:ggaData.bytes maxLength:ggaData.length];
     }
 }
 
-// 其他必要方法实现（错误处理、重连逻辑、数据发送等）
-- (void)handleStreamError:(NSError *)error {
-    _isConnected = NO;
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
-    [self.commandDelegate sendPluginResult:result callbackId:@"onError"];
-    
-    [self attemptReconnect];
+#pragma mark - 注册回调
+
+- (void)registerOnData:(CDVInvokedUrlCommand*)command {
+    self.onDataCallbackId = command.callbackId;
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+    [pluginResult setKeepCallbackAsBool:YES];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
-- (void)handleConnectionClose {
-    _isConnected = NO;
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"连接已关闭"];
-    [self.commandDelegate sendPluginResult:result callbackId:@"onClose"];
-    
-    [self attemptReconnect];
+- (void)registerOnRTCM:(CDVInvokedUrlCommand*)command {
+    self.onRTCMCallbackId = command.callbackId;
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+    [pluginResult setKeepCallbackAsBool:YES];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
-- (void)attemptReconnect {
-    if (_shouldReconnect && _reconnectAttempts < 5) {
-        _reconnectAttempts++;
-        _reconnectTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
-                                                           target:self
-                                                         selector:@selector(reconnect)
-                                                         userInfo:nil
-                                                          repeats:NO];
-    }
+- (void)registerOnError:(CDVInvokedUrlCommand*)command {
+    self.onErrorCallbackId = command.callbackId;
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+    [pluginResult setKeepCallbackAsBool:YES];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
-- (void)reconnect {
-    [self connectToServer:nil];
+- (void)registerOnClose:(CDVInvokedUrlCommand*)command {
+    self.onCloseCallbackId = command.callbackId;
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+    [pluginResult setKeepCallbackAsBool:YES];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
-
-// 其他API方法实现
-- (void)stopNtripClient:(CDVInvokedUrlCommand *)command {
-    _shouldReconnect = NO;
-    [_reconnectTimer invalidate];
-    [_inputStream close];
-    [_outputStream close];
-    _isConnected = NO;
-    
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"已停止NTRIP客户端"];
-    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
-}
-
-- (void)getConnectionStatus:(CDVInvokedUrlCommand *)command {
-    CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:_isConnected];
-    [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
-}
-
-// 实现其他必要方法...
 
 @end
